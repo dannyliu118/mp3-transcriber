@@ -20,6 +20,13 @@ wheels/
 .installed.cfg
 *.egg
 
+# 虛擬環境 (重要！)
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
 # PyInstaller
 *.manifest
 *.spec.bak

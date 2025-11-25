@@ -1,21 +1,20 @@
 name: Build macOS App
 
 on:
-  # 當推送到 main 分支時自動執行
+  # 當推送到 main 或 master 分支，或推送 tag 時執行
   push:
-    branches: [ main ]
+    branches: 
+      - main
+      - master
+    tags:
+      - 'v*'
   
   # 允許手動觸發
   workflow_dispatch:
-  
-  # 當建立 tag 時執行（用於發布版本）
-  push:
-    tags:
-      - 'v*'
 
 jobs:
   build-macos:
-    runs-on: macos-latest  # 使用 GitHub 提供的 macOS 環境
+    runs-on: macos-latest
     
     steps:
     # 步驟 1: 檢出程式碼
@@ -63,12 +62,4 @@ jobs:
           
           1. 下載 `中文轉錄工具-macOS.zip`
           2. 解壓縮後雙擊 `中文轉錄工具.app`
-          3. 如果出現安全性警告，請到「系統偏好設定 → 安全性與隱私權」允許執行
-          
-          ## 功能特色
-          - ✅ 支援批次處理
-          - ✅ 顯示預估時間
-          - ✅ 可隨時取消
-          - ✅ 自動轉換繁體中文
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          3. 如果出現

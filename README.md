@@ -10,4 +10,4 @@
 - 輸出 SRT 字幕檔和純文字檔
 
 ## 下載
-前往 [Releases](https://github.com/你的使用者名稱/mp3-transcriber/releases) 下載最新版本。
+前往 [Releases](https://github.com/dannyliu118/mp3-transcriber/releases) 下載最新版本。

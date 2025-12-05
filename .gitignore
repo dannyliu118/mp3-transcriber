@@ -36,7 +36,7 @@ test_audio/
 *.mp3
 *.wav
 *.srt
-*.txt
+
 
 # macOS
 .DS_Store
@@ -48,3 +48,4 @@ test_audio/
 .idea/
 *.swp
 *.swo
+github_upload.txt

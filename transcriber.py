@@ -6,7 +6,8 @@ from tkinter import filedialog, messagebox
 from faster_whisper import WhisperModel
 from opencc import OpenCC
 from datetime import timedelta
-
+import re
+import platform
 # --- 設定 ---
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -194,10 +195,75 @@ class TranscriberApp(ctk.CTk):
         thread = threading.Thread(target=self.process_audio, daemon=True)
         thread.start()
 
+    def get_device_config(self):
+        """根據作業系統自動選擇最佳裝置設定"""
+        system = platform.system()
+        machine = platform.machine()
+        
+        if system == "Darwin":  # macOS
+            if machine == "arm64":  # Apple Silicon (M1/M2/M3/M4)
+                self.log("✓ 偵測到 Apple Silicon，使用 Metal GPU 加速")
+                return {
+                    "device": "cpu",  # faster-whisper 在 macOS 上使用 "cpu" 但會利用 Metal
+                    "compute_type": "int8",
+                    "cpu_threads": 8,
+                    "num_workers": 4
+                }
+            else:  # Intel Mac
+                self.log("✓ 偵測到 Intel Mac，使用 CPU 運算")
+                return {
+                    "device": "cpu",
+                    "compute_type": "int8"
+                }
+        
+        # elif system == "Windows":  # Windows
+        #     try:
+        #         import torch
+        #         if torch.cuda.is_available():
+        #             self.log("✓ 偵測到 NVIDIA GPU，使用 CUDA 加速")
+        #             return {
+        #                 "device": "cuda",
+        #                 "compute_type": "float16"
+        #             }
+        #         else:
+        #             self.log("✓ 未偵測到 GPU，使用 CPU 運算")
+        #             return {
+        #                 "device": "cpu",
+        #                 "compute_type": "int8"
+        #             }
+        #     except ImportError:
+        #         self.log("⚠ 未安裝 PyTorch，使用 CPU 運算")
+        #         return {
+        #             "device": "cpu",
+        #             "compute_type": "int8"
+        #         }
+        
+        # else:  # Linux 或其他系統
+        #     try:
+        #         import torch
+        #         if torch.cuda.is_available():
+        #             self.log("✓ 偵測到 NVIDIA GPU，使用 CUDA 加速")
+        #             return {
+        #                 "device": "cuda",
+        #                 "compute_type": "float16"
+        #             }
+        #         else:
+        #             self.log("✓ 使用 CPU 運算")
+        #             return {
+        #                 "device": "cpu",
+        #                 "compute_type": "int8"
+        #             }
+        #     except ImportError:
+        #         self.log("✓ 使用 CPU 運算")
+        #         return {
+        #             "device": "cpu",
+        #             "compute_type": "int8"
+        #         }
+            
     def process_audio(self):
         """處理音訊（支援批次）"""
         try:
-            # 載入模型（只載入一次）
+            # 載入模型（只載入一次）- 針對 Apple Silicon 優化
             if self.model is None:
                 selection = self.model_size.get()
                 model_name = selection.split(" ")[0]
@@ -206,7 +272,11 @@ class TranscriberApp(ctk.CTk):
                 self.log(f"\n正在載入模型 {model_name} (初次執行需下載模型，請稍候)...")
                 self.progressbar.set(0.05)
                 
-                self.model = WhisperModel(model_name, device="cpu", compute_type="int8")
+                # 取得最佳裝置設定
+                device_config = self.get_device_config()
+
+                self.model = WhisperModel(model_name, **device_config)
+                
                 self.log("✓ 模型載入完成")
             
             # 批次處理所有檔案
@@ -269,7 +339,7 @@ class TranscriberApp(ctk.CTk):
                 file_path, 
                 beam_size=5, 
                 language="zh",
-                initial_prompt="這是一段繁體中文的對話，請使用台灣地區的用詞。"
+                initial_prompt="這是一段繁體中文的對話，請使用台灣地區的用詞。每個句子盡量保持簡短*最多只能有18個字，請在適當的地方斷句*，適合字幕顯示。"
             )
             
             transcribed_text = ""
@@ -315,17 +385,65 @@ class TranscriberApp(ctk.CTk):
                 # 繁簡轉換
                 original_text = segment.text
                 traditional_text = self.cc.convert(original_text)
+                
+                # 轉換為全形標點符號
+                punctuation_map = {
+                    ',': '，', '.': '。', '!': '！', '?': '？',
+                    ';': '；', ':': '：', '(': '（', ')': '）',
+                    '[': '「', ']': '」', '{': '『', '}': '』',
+                    '"': '」', "'": '」', '-': '－', '~': '～',
+                }
+                for half, full in punctuation_map.items():
+                    traditional_text = traditional_text.replace(half, full)
 
                 # 格式化時間
                 start_time = self.format_time(segment.start)
                 end_time = self.format_time(segment.end)
                 
-                # 累積內容 (TXT 格式包含時間戳記)
-                transcribed_text += f"[{start_time}] {traditional_text.strip()}\n"
-                srt_content += f"{segment_id}\n{start_time} --> {end_time}\n{traditional_text.strip()}\n\n"
+               # 在逗號和頓號處斷句
+                text_lines = []
+                current_text = traditional_text.strip()
                 
-                # 輸出到日誌
-                self.log(f"[{start_time}] {traditional_text}")
+                # 先按逗號和頓號分割
+                parts = re.split(r'([，？。])', current_text)
+                temp_line = ""
+                
+                for part in parts:
+                    if not part:
+                        continue
+                    
+                    # 如果是標點符號，加到當前行後斷行
+                    if part in '，？。':
+                        if temp_line:
+                            text_lines.append(temp_line.strip())
+                            temp_line = ""
+                    else:
+                        # 累積文字
+                        temp_line += part
+                
+                # 處理剩餘文字
+                if temp_line.strip():
+                    text_lines.append(temp_line.strip())
+                
+                # 如果沒有分割結果，使用原文
+                if not text_lines:
+                    text_lines = [current_text]
+                
+                # TXT 格式：保持單行但移除句尾標點
+                clean_text = traditional_text.strip().rstrip('，。！？、；：,.!?;:')
+                transcribed_text += f"[{start_time}] {clean_text}\n"
+                
+                # SRT 格式：使用分行後的結果
+                srt_text = '\n'.join(text_lines).strip().rstrip('，。！？、；：,.!?;:')
+                srt_content += f"{segment_id}\n{start_time} --> {end_time}\n{srt_text}\n\n"
+                
+                # 輸出到日誌（顯示所有內容）
+                if len(text_lines) > 1:
+                    self.log(f"[{start_time}] (共{len(text_lines)}行)")
+                    for idx, line in enumerate(text_lines, 1):
+                        self.log(f"  第{idx}行: {line}")
+                else:
+                    self.log(f"[{start_time}] {text_lines[0] if text_lines else clean_text}")
                 segment_id += 1
 
             # 儲存檔案
